@@ -72,7 +72,7 @@ class CashflowLeg(Security):
         """
         return (
             1 + self.discount_curve(self.cashflow_dates)
-            ) ** (-self.cashflow_dates)
+            ) ** (-self.cashflow_dates / self.day_count_fractions)
 
     @property
     def discounted_cashflows(self) -> np.ndarray:
@@ -132,7 +132,9 @@ class FixedCouponBond(Security):
             None,
             {
                 'cashflow_dates': self.coupon_dates,
-                'cashflows': self.coupon * np.ones(len(self.coupon_dates))
+                'cashflows': self.day_count_fraction \
+                * self.coupon \
+                * np.ones(len(self.coupon_dates))
                 }
             )
         return CashflowLeg(
@@ -142,11 +144,13 @@ class FixedCouponBond(Security):
 
     @property
     def principal_leg(self):
+        principal_curve = np.zeros(len(self.coupon_dates))
+        principal_curve[-1] = self.principal
         principal_term_sheet = defaultdict(
             None,
             {
-                'cashflow_dates': np.array([self.maturity]),
-                'cashflows': np.array([self.principal])
+                'cashflow_dates': self.coupon_dates,
+                'cashflows': principal_curve
             }
         )
         return CashflowLeg(
