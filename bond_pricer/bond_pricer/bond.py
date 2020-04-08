@@ -132,8 +132,8 @@ class FixedCouponBond(Security):
             None,
             {
                 'cashflow_dates': self.coupon_dates,
-                'cashflows': self.day_count_fraction \
-                * self.coupon \
+                'cashflows': self.day_count_fraction
+                * self.coupon
                 * np.ones(len(self.coupon_dates))
                 }
             )
