@@ -1,5 +1,5 @@
 import numpy as np
-import scipy
+from scipy.optimize import root
 from collections import defaultdict
 import abc
 from typing import Callable
@@ -201,7 +201,7 @@ class FixedCouponBond(Security):
     def price_to_yield(self, P: float) -> float:
         def f(y: float) -> float:
             return self.yield_to_price(y) - P
-        sol = scipy.optimize.root(f, self.coupon)
+        sol = root(f, self.coupon)
         if sol.success:
             return sol.x[0]
         else:
