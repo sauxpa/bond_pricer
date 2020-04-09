@@ -112,7 +112,7 @@ class FixedCouponBond(Security):
         return 1 / self.coupon_frequency
 
     @property
-    def coupon_dates(self) -> float:
+    def coupon_dates(self) -> np.ndarray:
         """Dates are relative: 4.5 means in 4.5 years from
         current pricing date.
         """
@@ -127,14 +127,18 @@ class FixedCouponBond(Security):
             return coupon_dates
 
     @property
+    def coupon_cashflows(self) -> np.ndarray:
+        return self.day_count_fraction * self.coupon * np.ones(
+            len(self.coupon_dates)
+            )
+
+    @property
     def coupon_leg(self):
         coupon_term_sheet = defaultdict(
             None,
             {
                 'cashflow_dates': self.coupon_dates,
-                'cashflows': self.day_count_fraction
-                * self.coupon
-                * np.ones(len(self.coupon_dates))
+                'cashflows': self.coupon_cashflows,
                 }
             )
         return CashflowLeg(
