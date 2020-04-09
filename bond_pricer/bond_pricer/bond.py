@@ -1,95 +1,44 @@
 import numpy as np
 from scipy.optimize import root
 from collections import defaultdict
-import abc
 from typing import Callable
+from .leg import CashflowLeg
+from .priceable import Priceable
 
 
-class Security(abc.ABC):
-    """Generic class.
-    """
+class FixedCouponBond(Priceable):
     def __init__(self,
                  term_sheet: defaultdict = defaultdict(),
-                 discount_curve: Callable = lambda: None,
-                 pricing_date: float = 0.0,
+                 marking_mode: str = 'price',
+                 mark: float = 0.0,
                  ) -> None:
-        self._term_sheet = term_sheet
-        self._discount_curve = discount_curve
-        self._pricing_date = pricing_date
-
-    @property
-    def term_sheet(self) -> defaultdict:
-        return self._term_sheet
-
-    @term_sheet.setter
-    def term_sheet(self, new_term_sheet: defaultdict) -> None:
-        self._term_sheet = new_term_sheet
-
-    @property
-    def discount_curve(self) -> Callable:
-        return self._discount_curve
-
-    @discount_curve.setter
-    def discount_curve(self, new_discount_curve: Callable) -> None:
-        self._discount_curve = new_discount_curve
-
-    @property
-    def pricing_date(self) -> float:
-        return self._pricing_date
-
-    @pricing_date.setter
-    def pricing_date(self, new_pricing_date: float) -> None:
-        self._pricing_date = new_pricing_date
-
-
-class CashflowLeg(Security):
-    def __init__(self,
-                 term_sheet: defaultdict = defaultdict(),
-                 discount_curve: Callable = lambda: None,
-                 pricing_date: float = 0.0,
-                 ) -> None:
-        super().__init__(
-            term_sheet=term_sheet,
-            discount_curve=discount_curve,
-            pricing_date=pricing_date,
-            )
-
-    @property
-    def cashflow_dates(self) -> np.ndarray:
-        return self.term_sheet.get('cashflow_dates')
-
-    @property
-    def cashflows(self) -> np.ndarray:
-        return self.term_sheet.get('cashflows')
-
-    @property
-    def day_count_fractions(self) -> np.ndarray:
-        return np.diff(self.cashflow_dates, prepend=self.pricing_date)
-
-    @property
-    def discount_factors(self) -> np.ndarray:
-        """self.discount_curve needs to be vectorized.
-        """
-        return (
-            1 + self.discount_curve(self.cashflow_dates)
-            ) ** (-self.cashflow_dates / self.day_count_fractions)
-
-    @property
-    def discounted_cashflows(self) -> np.ndarray:
-        return self.cashflows * self.discount_factors
-
-    @property
-    def price(self) -> float:
-        return np.sum(self.discounted_cashflows)
-
-
-class FixedCouponBond(Security):
-    def __init__(self,
-                 term_sheet: defaultdict = defaultdict(),
-                 ) -> None:
+        self.check_marking_mode(marking_mode)
+        self._marking_mode = marking_mode.lower()
+        self._mark = mark
         super().__init__(
             term_sheet=term_sheet
             )
+
+    def check_marking_mode(self, marking_mode: str) -> None:
+        msg = '{:s} not an available marking mode'.format(marking_mode)
+        assert marking_mode.lower() in {'price', 'ytm'}, msg
+
+    @property
+    def marking_mode(self) -> str:
+        return self._marking_mode
+
+    @marking_mode.setter
+    def marking_mode(self, new_marking_mode: str) -> None:
+        self.check_marking_mode(new_marking_mode)
+        self._marking_mode = new_marking_mode.lower()
+
+    @property
+    def mark(self) -> float:
+        return self._mark
+
+    @mark.setter
+    def mark(self, new_mark: float) -> None:
+        self._mark = new_mark
 
     @property
     def coupon(self) -> float:
@@ -215,7 +164,21 @@ class FixedCouponBond(Security):
         else:
             raise Exception('Cannot solve for price {}'.format(P))
 
-    def duration(self, P: float) -> float:
+    @property
+    def price(self) -> float:
+        if self.marking_mode == 'price':
+            return self.mark
+        else:
+            return self.yield_to_price(self.mark)
+
+    @property
+    def ytm(self) -> float:
+        if self.marking_mode == 'ytm':
+            return self.mark
+        else:
+            return self.price_to_yield(self.mark)
+
+    def duration_calc(self, P: float) -> float:
         Y = self.price_to_yield(P)
         coupon_cashflows = self.yield_to_coupon_cashflows(Y)
         principal_cashflows = self.yield_to_principal_cashflows(Y)
@@ -225,12 +188,24 @@ class FixedCouponBond(Security):
 
         return np.sum(dur_coupon_cashflows) + np.sum(dur_principal_cashflows)
 
-    def macaulay_duration(self, P: float) -> float:
+    def macaulay_duration_calc(self, P: float) -> float:
         return self.duration(P) / P
 
-    def dv01(self, P: float) -> float:
+    def dv01_calc(self, P: float) -> float:
         Y = self.price_to_yield(P)
         return self.duration(P) / (1 + self.day_count_fraction * Y)
 
-    def modified_duration(self, P: float) -> float:
+    def modified_duration_calc(self, P: float) -> float:
         return self.dv01(P) / P
+
+    @property
+    def macaulay_duration(self) -> float:
+        return self.duration_calc(self.price) / self.price
+
+    @property
+    def dv01(self) -> float:
+        return self.duration_calc(self.price) / (1 + self.day_count_fraction * self.ytm)
+
+    @property
+    def modified_duration(self) -> float:
+        return self.dv01 / self.price
