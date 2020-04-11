@@ -24,6 +24,7 @@ class FixedCouponBond(Priceable):
         self._funding_rate = funding_rate
         self._sim_config = sim_config
         self._gen_path = None
+        self.paths = pd.DataFrame()
 
         super().__init__(
             term_sheet=term_sheet
@@ -316,9 +317,15 @@ class FixedCouponBond(Priceable):
                 barrier_condition='absorb'
                 )
         else:
-            raise Exception('Unknown model name: {:s}'.format(self.model_name))
+            raise Exception(
+                'Unknown model name: {:s}'.format(self.model_name)
+                )
 
-    def check_default(self, intensity: pd.Series, tstart: float, tend: float):
+    def check_default(self,
+                      intensity: pd.Series,
+                      tstart: float,
+                      tend: float
+                      ):
         """Jump to default is an inhomogeneous Poisson process.
         Check if there is a jump between tstart and tend.
         """
@@ -348,6 +355,7 @@ class FixedCouponBond(Priceable):
 
     def simulate_with_discount_factor(self,
                                       gen_: Callable,
+                                      idx=0
                                       ) -> pd.DataFrame:
         df = gen_.simulate()
         df = self.insert_coupon_dates_index(df)
@@ -356,21 +364,32 @@ class FixedCouponBond(Priceable):
             -gen_.scheme_step * df[['IR', 'CD']].cumsum().iloc[:-1]
         )
         df_discount.index = df.index[1:]
-        df['ir_discount_factor'] = df_discount['IR']
-        df['survival_prob'] = df_discount['CD']
-        df['fr_discount_factor'] = np.exp(-df.index*self.funding_rate)
-        df['ir_discount_factor'].iloc[0] = 1.0
-        df['survival_prob'].iloc[0] = 1.0
-        df['total_discount_factor'] = df['ir_discount_factor'] \
-            * df['fr_discount_factor']
+        df['ir_discount_factor_{}'.format(idx)] = df_discount['IR']
+        df['survival_prob_{}'.format(idx)] = df_discount['CD']
+        df['fr_discount_factor_{}'.format(idx)] = np.exp(
+            -df.index * self.funding_rate
+            )
+        df['ir_discount_factor_{}'.format(idx)].iloc[0] = 1.0
+        df['survival_prob_{}'.format(idx)].iloc[0] = 1.0
+        df['total_discount_factor_{}'.format(idx)] \
+            = df['ir_discount_factor_{}'.format(idx)] \
+            * df['fr_discount_factor_{}'.format(idx)]
+        df = df.rename(
+            columns={
+                'IR': 'IR_{}'.format(idx),
+                'CD': 'CD_{}'.format(idx),
+                }
+            )
         return df
 
-    def PV_bullet_on_path(self,
-                          df_: pd.DataFrame,
-                          tstart: float,
-                          tend: float,
-                          default_date=None,
-                          ) -> float:
+    def PV_bullet_on_path(
+        self,
+        df_: pd.DataFrame,
+        tstart: float,
+        tend: float,
+        default_date: None = None,
+        discount_factor_name: str = 'total_discount_factor',
+    ) -> float:
         """For simplicity, assume no accrued coupon is recovered
         in case of default, only the principal.
         Path is on (tstart, tend] if default_date is None,
@@ -382,22 +401,23 @@ class FixedCouponBond(Priceable):
         remaining_coupons = self.coupon_dates[
             (self.coupon_dates > tstart) * (self.coupon_dates <= tend)
         ]
-        PV_bullet_coupon = df_['total_discount_factor'].loc[
+        PV_bullet_coupon = df_[discount_factor_name].loc[
             remaining_coupons
         ].sum() * self.coupon * self.day_count_fraction
-        PV_bullet_principal = df_['total_discount_factor'].loc[
+        PV_bullet_principal = df_[discount_factor_name].loc[
             tend
         ] * recovered_principal
         return PV_bullet_coupon + PV_bullet_principal
 
-    def model_price_paths(self):
+    def model_price_paths(self) -> np.ndarray:
         PVs = np.empty(self.n_mc_sim)
-        self.paths = []
+        paths = []
         for i in range(self.n_mc_sim):
-            df = self.simulate_with_discount_factor(self._gen_path)
-            # Check for credit default on this path on [pricing_date, maturity]
+            df = self.simulate_with_discount_factor(self._gen_path, idx=i)
+            # Check for credit default on this path on
+            # [pricing_date, maturity]
             default_date = self.check_default(
-                df['CD'] * self._gen_path.scheme_step,
+                df['CD_{}'.format(i)] * self._gen_path.scheme_step,
                 self.pricing_date,
                 self.maturity,
             )
@@ -406,12 +426,14 @@ class FixedCouponBond(Priceable):
                 self.pricing_date,
                 self.maturity,
                 default_date=default_date,
+                discount_factor_name='total_discount_factor_{}'.format(i)
             )
-            self.paths.append(df)
+            paths.append(df)
+        self.paths = pd.concat(paths, axis='columns')
         return PVs
 
     @property
-    def model_price(self):
+    def model_price(self) -> float:
         self.init_gen_path()
         PVs = self.model_price_paths()
         return np.mean(PVs)
