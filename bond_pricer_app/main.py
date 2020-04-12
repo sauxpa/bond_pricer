@@ -19,6 +19,7 @@ MARKING_MODE_MAP = {
     2: 'ytm',
 }
 CASHFLOW_WIDTH = 0.05
+N_PM_NAMES = 2
 
 
 def extract_numeric_input(s: str) -> int:
@@ -111,6 +112,7 @@ def make_dataset_model(coupon,
                        init_cd,
                        scheme_steps,
                        n_mc_sim,
+                       pm_name_int,
                        mr_ir,
                        mr_cd,
                        lt_ir,
@@ -145,6 +147,13 @@ def make_dataset_model(coupon,
     vol_cd *= ONE_BP
     corr_ir_cd *= ONE_PCT
 
+    if pm_name_int == 1:
+        pm_name = 'Vasicek'
+    elif pm_name_int == 2:
+        pm_name = 'BK'
+    else:
+        raise ValueError('Unknown PM name.')
+
     model_params = {
         'mean_reversion_ir': mr_ir,
         'mean_reversion_cd': mr_cd,
@@ -158,7 +167,7 @@ def make_dataset_model(coupon,
     sim_config = defaultdict(
         None,
         {
-            'pm_name': 'Vasicek',
+            'pm_name': pm_name,
             'init_ir': init_ir,
             'init_cd': init_cd,
             'scheme_steps': scheme_steps,
@@ -339,6 +348,8 @@ def update_model(attr, old, new):
     scheme_steps = extract_numeric_input(scheme_steps_select.value)
     n_mc_sim = extract_numeric_input(n_mc_sim_select.value)
 
+    pm_name = pm_name_select.value
+
     mr_ir = extract_numeric_input(mr_ir_select.value)
     mr_cd = extract_numeric_input(mr_cd_select.value)
     lt_ir = extract_numeric_input(lt_ir_select.value)
@@ -357,6 +368,7 @@ def update_model(attr, old, new):
         init_cd,
         scheme_steps,
         n_mc_sim,
+        pm_name,
         mr_ir,
         mr_cd,
         lt_ir,
@@ -458,6 +470,13 @@ n_mc_sim_select = TextInput(value='10', title='Number of MC simulations')
 init_ir_select = TextInput(value='50.0', title='Spot IR (bp)')
 init_cd_select = TextInput(value='150.0', title='Spot CD (bp)')
 
+pm_name_select = Slider(start=1,
+                        end=N_PM_NAMES,
+                        step=1,
+                        title='PM Name',
+                        value=1,
+                        )
+
 mr_ir_select = TextInput(value='1.0', title='Mean reversion IR')
 mr_cd_select = TextInput(value='1.0', title='Mean reversion CD')
 lt_ir_select = TextInput(value='50.0', title='Long-term IR (bp)')
@@ -478,6 +497,8 @@ n_mc_sim_select.on_change('value', update_model)
 
 init_ir_select.on_change('value', update_model)
 init_cd_select.on_change('value', update_model)
+
+pm_name_select.on_change('value', update_model)
 
 mr_ir_select.on_change('value', update_model)
 mr_cd_select.on_change('value', update_model)
@@ -501,6 +522,8 @@ n_mc_sim = extract_numeric_input(n_mc_sim_select.value)
 init_ir = extract_numeric_input(init_ir_select.value)
 init_cd = extract_numeric_input(init_cd_select.value)
 
+pm_name = pm_name_select.value
+
 mr_ir = extract_numeric_input(mr_ir_select.value)
 mr_cd = extract_numeric_input(mr_cd_select.value)
 lt_ir = extract_numeric_input(lt_ir_select.value)
@@ -521,6 +544,7 @@ src_model = make_dataset_model(
     init_cd,
     scheme_steps,
     n_mc_sim,
+    pm_name,
     mr_ir,
     mr_cd,
     lt_ir,
@@ -539,6 +563,7 @@ controls_model = WidgetBox(
     funding_rate_select,
     init_ir_select,
     init_cd_select,
+    pm_name_select,
     width=350,
     height=650,
     )
