@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 from scipy.optimize import root
 from collections import defaultdict
-from typing import Callable
+from typing import Callable, Union
 from ito_diffusions import Vasicek_multi_d
 from .leg import CashflowLeg
 from .priceable import Priceable
@@ -254,8 +254,8 @@ class FixedCouponBond(Priceable):
         return self.dv01 / self.price
 
     @property
-    def model_name(self) -> str:
-        return self.sim_config.get('model_name')
+    def pm_name(self) -> str:
+        return self.sim_config.get('pm_name')
 
     @property
     def init_ir(self) -> float:
@@ -289,43 +289,14 @@ class FixedCouponBond(Priceable):
         """Initialize the path generator
         for the rates (IR) and credit (CD) factors.
         """
-        if self.model_name == 'Vasicek':
-            assert len(self.model_params) == 7
-            cov_matrix = [
-                [
-                    self.model_params['vol_ir'],
-                    0.0
-                ],
-                [
-                    self.model_params['vol_cd']
-                    * self.model_params['corr_ir_cd'],
-                    self.model_params['vol_cd']
-                    * np.sqrt(1 - self.model_params['corr_ir_cd'])
-                ]
-            ]
-            self._gen_path = Vasicek_multi_d(
-                x0=[self.init_ir, self.init_cd],
-                T=self.maturity,
-                mean_reversion=[self.model_params['mean_reversion_ir'],
-                                self.model_params['mean_reversion_cd']],
-                long_term=[self.model_params['long_term_ir'],
-                           self.model_params['long_term_cd']],
-                vol=cov_matrix,
-                scheme_steps=self.scheme_steps,
-                keys=['IR', 'CD'],
-                barrier=[None, 0.0],
-                barrier_condition='absorb'
-                )
-        else:
-            raise Exception(
-                'Unknown model name: {:s}'.format(self.model_name)
-                )
+        mgr = BondPM_mgr()
+        self._gen_path = mgr.model(self)
 
     def check_default(self,
                       intensity: pd.Series,
                       tstart: float,
                       tend: float
-                      ):
+                      ) -> Union[float, None]:
         """Jump to default is an inhomogeneous Poisson process.
         Check if there is a jump between tstart and tend.
         """
@@ -437,3 +408,41 @@ class FixedCouponBond(Priceable):
         self.init_gen_path()
         PVs = self.model_price_paths()
         return np.mean(PVs)
+
+
+class BondPM_mgr():
+    def __init__(self):
+        pass
+
+    def model(self, bond: 'FixedCouponBond') -> Callable:
+        if bond.pm_name == 'Vasicek':
+            assert len(bond.model_params) == 7
+            cov_matrix = [
+                [
+                    bond.model_params['vol_ir'],
+                    0.0
+                ],
+                [
+                    bond.model_params['vol_cd']
+                    * bond.model_params['corr_ir_cd'],
+                    bond.model_params['vol_cd']
+                    * np.sqrt(1 - bond.model_params['corr_ir_cd'])
+                ]
+            ]
+            return Vasicek_multi_d(
+                x0=[bond.init_ir, bond.init_cd],
+                T=bond.maturity,
+                mean_reversion=[bond.model_params['mean_reversion_ir'],
+                                bond.model_params['mean_reversion_cd']],
+                long_term=[bond.model_params['long_term_ir'],
+                           bond.model_params['long_term_cd']],
+                vol=cov_matrix,
+                scheme_steps=bond.scheme_steps,
+                keys=['IR', 'CD'],
+                barrier=[None, 0.0],
+                barrier_condition='absorb'
+                )
+        else:
+            raise Exception(
+                'Unknown model name: {:s}'.format(bond.pm_name)
+                )
