@@ -158,7 +158,7 @@ def make_dataset_model(coupon,
     sim_config = defaultdict(
         None,
         {
-            'model_name': 'Vasicek',
+            'pm_name': 'Vasicek',
             'init_ir': init_ir,
             'init_cd': init_cd,
             'scheme_steps': scheme_steps,
@@ -180,7 +180,7 @@ def make_dataset_model(coupon,
     params_text = 'Pricing model: {:s}<ul>\
     <li>Price = <b>{:.2%}</b></li>\
     </ul>'.format(
-        bond.model_name,
+        bond.pm_name,
         bond.model_price,
         )
     div_.text = params_text
