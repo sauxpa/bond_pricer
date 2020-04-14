@@ -3,7 +3,7 @@ import pandas as pd
 from scipy.optimize import root
 from collections import defaultdict
 from typing import Callable, Union
-from ito_diffusions import Vasicek_multi_d
+from ito_diffusions import Vasicek_multi_d, BlackKarasinski_multi_d
 from .leg import CashflowLeg
 from .priceable import Priceable
 
@@ -308,17 +308,23 @@ class FixedCouponBond(Priceable):
         else:
             return None
 
-    def insert_coupon_dates_index(self,
-                                  df_: pd.DataFrame,
-                                  interp_method='linear'
-                                  ) -> pd.DataFrame:
+    @property
+    def model_dates(self) -> np.ndarray:
+        """Dates that need to be knots in the diffusion grid.
+        """
+        return self.coupon_dates
+
+    def insert_dates_index(self,
+                           df_: pd.DataFrame,
+                           interp_method='linear',
+                           ) -> pd.DataFrame:
         """Coupon dates may no coincide with diffusion scheme knots.
         Interpolate between scheme knots to add coupon dates.
         Interpolate in short rates space, i.e before computing
         the discount factors (more precise than interpolating the discount
-        factors).
+        factors);
         """
-        new_idx = set(np.concatenate([self.coupon_dates, df_.index]))
+        new_idx = set(np.concatenate([self.model_dates, df_.index]))
         return df_.reindex(index=new_idx).sort_index().interpolate(
             method=interp_method,
             axis=0,
@@ -326,10 +332,10 @@ class FixedCouponBond(Priceable):
 
     def simulate_with_discount_factor(self,
                                       gen_: Callable,
-                                      idx=0
+                                      idx=0,
                                       ) -> pd.DataFrame:
         df = gen_.simulate()
-        df = self.insert_coupon_dates_index(df)
+        df = self.insert_dates_index(df)
 
         df_discount = np.exp(
             -gen_.scheme_step * df[['IR', 'CD']].cumsum().iloc[:-1]
@@ -430,6 +436,33 @@ class BondPM_mgr():
                 ]
             ]
             return Vasicek_multi_d(
+                x0=[bond.init_ir, bond.init_cd],
+                T=bond.maturity,
+                mean_reversion=[bond.model_params['mean_reversion_ir'],
+                                bond.model_params['mean_reversion_cd']],
+                long_term=[bond.model_params['long_term_ir'],
+                           bond.model_params['long_term_cd']],
+                vol=cov_matrix,
+                scheme_steps=bond.scheme_steps,
+                keys=['IR', 'CD'],
+                barrier=[None, 0.0],
+                barrier_condition='absorb'
+                )
+        elif bond.pm_name == 'BK':
+            assert len(bond.model_params) == 7
+            cov_matrix = [
+                [
+                    bond.model_params['vol_ir'],
+                    0.0
+                ],
+                [
+                    bond.model_params['vol_cd']
+                    * bond.model_params['corr_ir_cd'],
+                    bond.model_params['vol_cd']
+                    * np.sqrt(1 - bond.model_params['corr_ir_cd'])
+                ]
+            ]
+            return BlackKarasinski_multi_d(
                 x0=[bond.init_ir, bond.init_cd],
                 T=bond.maturity,
                 mean_reversion=[bond.model_params['mean_reversion_ir'],

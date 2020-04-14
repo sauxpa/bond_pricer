@@ -1,0 +1,174 @@
+import numpy as np
+import pandas as pd
+from collections import defaultdict
+from typing import Callable
+from sklearn.preprocessing import PolynomialFeatures
+from sklearn.linear_model import LinearRegression
+from .bond import FixedCouponBond
+
+
+class SingleCallableFixedCouponBond(FixedCouponBond):
+    def __init__(self,
+                 term_sheet: defaultdict = defaultdict(),
+                 marking_mode: str = 'price',
+                 mark: float = 0.0,
+                 recovery_rate: float = 0.4,
+                 funding_rate: float = 0.0,
+                 sim_config: defaultdict = defaultdict(float),
+                 ) -> None:
+        super().__init__(
+            term_sheet=term_sheet,
+            marking_mode=marking_mode,
+            mark=mark,
+            recovery_rate=recovery_rate,
+            funding_rate=funding_rate,
+            sim_config=sim_config,
+            )
+
+    @property
+    def n_ls_sim(self) -> int:
+        """Number of paths to learn from in the
+        Longstaff-Schwartz algorithm.
+        """
+        return self.sim_config.get('n_ls_sim')
+
+    @property
+    def ls_degree(self) -> int:
+        """Polynonial regression degree in the
+        Longstaff-Schwartz algorithm.
+        """
+        return self.sim_config.get('ls_degree')
+
+    @property
+    def call_date(self) -> float:
+        return self.term_sheet.get('call_date')
+
+    @property
+    def model_dates(self) -> np.ndarray:
+        """Dates that need to be knots in the diffusion grid.
+        """
+        return np.unique(np.append(self.coupon_dates, [self.call_date]))
+
+    @property
+    def _poly_features(self) -> Callable:
+        return PolynomialFeatures(degree=self.ls_degree)
+
+    def _generate_ls_paths(self) -> tuple:
+        """Generates short rates paths and corresponding
+        no call PV to be used as training example for the
+        regresion step in the Longstaff-Schwartz algorithm.
+        """
+        PV_no_calls = np.empty(self.n_ls_sim)
+        short_rates = np.empty((self.n_ls_sim, 2))
+
+        for i in range(self.n_ls_sim):
+            df = self.simulate_with_discount_factor(self._gen_path, idx=i)
+            discount_factor_name = 'total_discount_factor_{}'.format(i)
+
+            default_date = self.check_default(
+                            df['CD_{}'.format(i)]
+                            * self._gen_path.scheme_step,
+                            self.pricing_date,
+                            self.call_date,
+                        )
+
+            PV_no_call = self.PV_bullet_on_path(
+                df,
+                self.call_date,
+                self.maturity,
+                default_date=default_date,
+                discount_factor_name=discount_factor_name,
+            )
+
+            short_rates[i] = [
+                df['IR_{}'.format(i)].loc[self.call_date],
+                df['CD_{}'.format(i)].loc[self.call_date]
+            ]
+            PV_no_calls[i] = PV_no_call
+        return short_rates, PV_no_calls
+
+    def ls_learning_phase(self) -> Callable:
+        """Learn a log-polynomial approximator of the call decision
+        function. Training is done on generated short rates paths.
+        """
+        short_rates, PV_no_calls = self._generate_ls_paths()
+        # Transform the short rates data into polynomial features.
+        poly_short_rates = self._poly_features.fit_transform(short_rates)
+
+        PV_no_call_approximator = LinearRegression()
+        PV_no_call_approximator.fit(poly_short_rates, PV_no_calls)
+        return PV_no_call_approximator
+
+    def issuer_calls(self,
+                     short_rates: np.ndarray,
+                     PV_no_call_approximator: Callable,
+                     ) -> bool:
+        """Estimate whether the issuer calls.
+        """
+        PV_no_call_pred = PV_no_call_approximator.predict(
+            self._poly_features.fit_transform([short_rates])
+            )
+        PV_call = self.principal
+        return PV_call < PV_no_call_pred
+
+    def model_price_paths(self) -> np.ndarray:
+        PV_no_call_approximator = self.ls_learning_phase()
+
+        PVs = np.empty(self.n_mc_sim)
+        paths = []
+
+        for i in range(self.n_mc_sim):
+            df = self.simulate_with_discount_factor(self._gen_path, idx=i)
+            discount_factor_name = 'total_discount_factor_{}'.format(i)
+            # Check for credit default on this path on
+            # [pricing_date, call_date]
+            default_date = self.check_default(
+                df['CD_{}'.format(i)] * self._gen_path.scheme_step,
+                self.pricing_date,
+                self.call_date,
+            )
+
+            if default_date:
+                PVs[i] = self.PV_bullet_on_path(
+                        df,
+                        self.pricing_date,
+                        self.call_date,
+                        default_date=default_date,
+                        discount_factor_name=discount_factor_name,
+                    )
+            else:
+                short_rates = np.array(
+                    [
+                        df['IR_{}'.format(i)].loc[self.call_date],
+                        df['CD_{}'.format(i)].loc[self.call_date]
+                    ]
+                )
+
+                if self.issuer_calls(short_rates, PV_no_call_approximator):
+                    # No default, PV on [pricing_date, call_date],
+                    # principal paid at call_date
+                    PVs[i] = self.PV_bullet_on_path(
+                        df,
+                        self.pricing_date,
+                        self.call_date,
+                        discount_factor_name=discount_factor_name,
+                    )
+                else:
+                    default_date = self.check_default(
+                        df['CD_{}'.format(i)] * self._gen_path.scheme_step,
+                        self.call_date,
+                        self.maturity,
+                    )
+
+                    # If default, PV on [pricing_date, default_date],
+                    # principal partially recovered at default_date
+                    PVs[i] = self.PV_bullet_on_path(
+                        df,
+                        self.pricing_date,
+                        self.maturity,
+                        default_date=default_date,
+                        discount_factor_name=discount_factor_name,
+                        )
+            paths.append(df)
+        self.paths = pd.concat(paths, axis='columns')
+        return PVs
