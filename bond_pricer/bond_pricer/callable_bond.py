@@ -28,8 +28,7 @@ class SingleCallableFixedCouponBond(FixedCouponBond):
 
     @property
     def n_mc_call_sim(self) -> int:
-        """Number of paths to learn from in the
-        Longstaff-Schwartz algorithm.
+        """Number of MC paths to estimate the call decision.
         """
         return self.sim_config.get('n_mc_call_sim')
 
@@ -53,9 +52,8 @@ class SingleCallableFixedCouponBond(FixedCouponBond):
         return np.unique(np.append(self.coupon_dates, [self.call_date]))
 
     def generate_paths_after_call(self, x0: np.ndarray) -> tuple:
-        """Generates short rates paths and corresponding
-        no call PV to be used as training example for the
-        regresion step in the Longstaff-Schwartz algorithm.
+        """Generates short rates paths starting from x0 at call dates
+        to estimate the no call PV and therefore the call decision.
         """
         PV_no_calls = np.empty(self.n_mc_call_sim)
 
