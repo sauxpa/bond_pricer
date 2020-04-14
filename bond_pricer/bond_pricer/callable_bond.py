@@ -5,6 +5,7 @@ from typing import Callable
 from sklearn.preprocessing import PolynomialFeatures
 from sklearn.linear_model import LinearRegression
 from .bond import FixedCouponBond
+from .utils import ONE_PCT
 
 
 class SingleCallableFixedCouponBond(FixedCouponBond):
@@ -95,26 +96,36 @@ class SingleCallableFixedCouponBond(FixedCouponBond):
         # Transform the short rates data into polynomial features.
         poly_short_rates = self._poly_features.fit_transform(short_rates)
 
-        PV_no_call_approximator = LinearRegression()
-        PV_no_call_approximator.fit(poly_short_rates, PV_no_calls)
-        return PV_no_call_approximator
+        log_PV_no_call_approximator = LinearRegression(
+            fit_intercept=True,
+            normalize=True,
+            )
+
+        log_PV_no_call_approximator.fit(
+            poly_short_rates / ONE_PCT,
+            np.log(PV_no_calls),
+            )
+        return log_PV_no_call_approximator
 
     def issuer_calls(self,
                      short_rates: np.ndarray,
-                     PV_no_call_approximator: Callable,
+                     log_PV_no_call_approximator: Callable,
                      ) -> bool:
         """Estimate whether the issuer calls.
         """
-        PV_no_call_pred = PV_no_call_approximator.predict(
-            self._poly_features.fit_transform([short_rates])
+        PV_no_call_pred = np.exp(
+            log_PV_no_call_approximator.predict(
+                self._poly_features.fit_transform([short_rates / ONE_PCT])
+                )
             )
         PV_call = self.principal
         return PV_call < PV_no_call_pred
 
     def model_price_paths(self) -> np.ndarray:
-        PV_no_call_approximator = self.ls_learning_phase()
+        log_PV_no_call_approximator = self.ls_learning_phase()
 
         PVs = np.empty(self.n_mc_sim)
+        calls = []  # to estimate the call probability given survival
         paths = []
 
         for i in range(self.n_mc_sim):
@@ -144,7 +155,8 @@ class SingleCallableFixedCouponBond(FixedCouponBond):
                     ]
                 )
 
-                if self.issuer_calls(short_rates, PV_no_call_approximator):
+                if self.issuer_calls(short_rates, log_PV_no_call_approximator):
+                    calls.append(True)
                     # No default, PV on [pricing_date, call_date],
                     # principal paid at call_date
                     PVs[i] = self.PV_bullet_on_path(
@@ -154,6 +166,7 @@ class SingleCallableFixedCouponBond(FixedCouponBond):
                         discount_factor_name=discount_factor_name,
                     )
                 else:
+                    calls.append(False)
                     default_date = self.check_default(
                         df['CD_{}'.format(i)] * self._gen_path.scheme_step,
                         self.call_date,
@@ -171,4 +184,5 @@ class SingleCallableFixedCouponBond(FixedCouponBond):
                         )
             paths.append(df)
         self.paths = pd.concat(paths, axis='columns')
+        self.call_prob = np.mean(calls)
         return PVs
