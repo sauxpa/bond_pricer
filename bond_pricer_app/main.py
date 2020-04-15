@@ -2,8 +2,8 @@ import numpy as np
 import pandas as pd
 from collections import defaultdict
 import itertools
-from bond_pricer import FixedCouponBond, SingleCallableFixedCouponBond,\
-    ONE_PCT, ONE_BP
+from bond_pricer import FixedCouponBond, ONE_PCT, ONE_BP,\
+    SingleCallableFixedCouponBond, SingleCallableFixedCouponBondLS
 
 from bokeh.io import curdoc
 from bokeh.models import ColumnDataSource, Panel
@@ -21,6 +21,7 @@ MARKING_MODE_MAP = {
 }
 CASHFLOW_WIDTH = 0.05
 N_PM_NAMES = 2
+N_CALL_PM_NAMES = 2
 
 
 def extract_numeric_input(s: str) -> int:
@@ -213,9 +214,10 @@ def make_dataset_call_model(coupon,
                             init_cd,
                             scheme_steps,
                             n_mc_sim,
-                            n_ls_sim,
+                            n_mc_call_sim,
                             ls_degree,
                             pm_name_int,
+                            call_pm_name_int,
                             mr_ir,
                             mr_cd,
                             lt_ir,
@@ -258,6 +260,13 @@ def make_dataset_call_model(coupon,
     else:
         raise ValueError('Unknown PM name.')
 
+    if call_pm_name_int == 1:
+        call_pm_name = 'MC'
+    elif call_pm_name_int == 2:
+        call_pm_name = 'Longstaff-Schwartz'
+    else:
+        raise ValueError('Unknown Call PM name.')
+
     model_params = {
         'mean_reversion_ir': mr_ir,
         'mean_reversion_cd': mr_cd,
@@ -276,27 +285,39 @@ def make_dataset_call_model(coupon,
             'init_cd': init_cd,
             'scheme_steps': scheme_steps,
             'n_mc_sim': n_mc_sim,
-            'n_ls_sim': n_ls_sim,
-            'ls_degree': ls_degree,
             'model_params': model_params,
         }
     )
 
-    bond = SingleCallableFixedCouponBond(
-        term_sheet,
-        recovery_rate=recovery_rate,
-        funding_rate=funding_rate,
-        sim_config=sim_config,
-        )
+    if call_pm_name == 'MC':
+        sim_config['n_mc_call_sim'] = n_mc_call_sim
+        bond = SingleCallableFixedCouponBond(
+            term_sheet,
+            recovery_rate=recovery_rate,
+            funding_rate=funding_rate,
+            sim_config=sim_config,
+            )
+    elif call_pm_name == 'Longstaff-Schwartz':
+        sim_config['n_ls_sim'] = n_mc_call_sim
+        sim_config['ls_degree'] = ls_degree
+        bond = SingleCallableFixedCouponBondLS(
+            term_sheet,
+            recovery_rate=recovery_rate,
+            funding_rate=funding_rate,
+            sim_config=sim_config,
+            )
 
     # Fix random seed (for reproducibility of MC simulations)
     np.random.seed(2)
 
-    params_text = 'Pricing model: {:s}<ul>\
+    params_text = '<ul>\
+    <li>PM Name: <b>{:s}</b></li>\
+    <li>Call PM Name: <b>{:s}</b></li>\
     <li>Price = <b>{:.2%}</b></li>\
     <li>Call probability = <b>{:.2%}</b></li>\
     </ul>'.format(
-        bond.pm_name,
+        pm_name,
+        call_pm_name,
         bond.model_price,
         bond.call_prob,
         )
@@ -559,10 +580,11 @@ def update_call_model(attr, old, new):
 
     scheme_steps = extract_numeric_input(scheme_steps_call_select.value)
     n_mc_sim = extract_numeric_input(n_mc_sim_call_select.value)
-    n_ls_sim = extract_numeric_input(n_ls_sim_call_select.value)
+    n_mc_call_sim = extract_numeric_input(n_mc_call_sim_select.value)
     ls_degree = extract_numeric_input(ls_degree_call_select.value)
 
     pm_name = pm_name_call_select.value
+    call_pm_name = call_pm_name_call_select.value
 
     mr_ir = extract_numeric_input(mr_ir_call_select.value)
     mr_cd = extract_numeric_input(mr_cd_call_select.value)
@@ -583,9 +605,10 @@ def update_call_model(attr, old, new):
         init_cd,
         scheme_steps,
         n_mc_sim,
-        n_ls_sim,
+        n_mc_call_sim,
         ls_degree,
         pm_name,
+        call_pm_name,
         mr_ir,
         mr_cd,
         lt_ir,
@@ -838,7 +861,10 @@ scheme_steps_call_select = TextInput(
     value='100', title='Number of diffusion steps'
 )
 n_mc_sim_call_select = TextInput(value='10', title='Number of MC simulations')
-n_ls_sim_call_select = TextInput(value='10', title='Number of LS simulations')
+n_mc_call_sim_select = TextInput(
+    value='10',
+    title='Number of call MC simulations'
+    )
 ls_degree_call_select = TextInput(value='3', title='Degree of LS regression')
 
 init_ir_call_select = TextInput(value='50.0', title='Spot IR (bp)')
@@ -850,6 +876,13 @@ pm_name_call_select = Slider(start=1,
                              title='PM name',
                              value=1,
                              )
+
+call_pm_name_call_select = Slider(start=1,
+                                  end=N_CALL_PM_NAMES,
+                                  step=1,
+                                  title='Call PM name',
+                                  value=1,
+                                  )
 
 mr_ir_call_select = TextInput(value='1.0', title='Mean reversion IR')
 mr_cd_call_select = TextInput(value='1.0', title='Mean reversion CD')
@@ -869,13 +902,14 @@ recovery_rate_call_select.on_change('value', update_call_model)
 funding_rate_call_select.on_change('value', update_call_model)
 scheme_steps_call_select.on_change('value', update_call_model)
 n_mc_sim_call_select.on_change('value', update_call_model)
-n_ls_sim_call_select.on_change('value', update_call_model)
+n_mc_call_sim_select.on_change('value', update_call_model)
 ls_degree_call_select.on_change('value', update_call_model)
 
 init_ir_call_select.on_change('value', update_call_model)
 init_cd_call_select.on_change('value', update_call_model)
 
 pm_name_call_select.on_change('value', update_call_model)
+call_pm_name_call_select.on_change('value', update_call_model)
 
 mr_ir_call_select.on_change('value', update_call_model)
 mr_cd_call_select.on_change('value', update_call_model)
@@ -896,13 +930,14 @@ recovery_rate_call = extract_numeric_input(recovery_rate_call_select.value)
 funding_rate_call = extract_numeric_input(funding_rate_call_select.value)
 scheme_steps_call = extract_numeric_input(scheme_steps_call_select.value)
 n_mc_sim_call = extract_numeric_input(n_mc_sim_call_select.value)
-n_ls_sim_call = extract_numeric_input(n_ls_sim_call_select.value)
+n_mc_call_sim = extract_numeric_input(n_mc_call_sim_select.value)
 ls_degree_call = extract_numeric_input(ls_degree_call_select.value)
 
 init_ir_call = extract_numeric_input(init_ir_call_select.value)
 init_cd_call = extract_numeric_input(init_cd_call_select.value)
 
 pm_name_call = pm_name_call_select.value
+call_pm_name_call = call_pm_name_call_select.value
 
 mr_ir_call = extract_numeric_input(mr_ir_call_select.value)
 mr_cd_call = extract_numeric_input(mr_cd_call_select.value)
@@ -925,9 +960,10 @@ src_call_model = make_dataset_call_model(
     init_cd_call,
     scheme_steps_call,
     n_mc_sim_call,
-    n_ls_sim_call,
+    n_mc_call_sim,
     ls_degree_call,
     pm_name_call,
+    call_pm_name_call,
     mr_ir_call,
     mr_cd_call,
     lt_ir_call,
@@ -948,6 +984,7 @@ controls_call_model = WidgetBox(
     init_ir_call_select,
     init_cd_call_select,
     pm_name_call_select,
+    call_pm_name_call_select,
     width=350,
     height=700,
     )
@@ -955,7 +992,7 @@ controls_call_model = WidgetBox(
 controls_call_model_params = WidgetBox(
     scheme_steps_call_select,
     n_mc_sim_call_select,
-    n_ls_sim_call_select,
+    n_mc_call_sim_select,
     ls_degree_call_select,
     mr_ir_call_select,
     mr_cd_call_select,
