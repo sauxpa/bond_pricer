@@ -326,12 +326,10 @@ class FixedCouponBond(Priceable):
         the discount factors (more precise than interpolating the discount
         factors);
         """
-        if tstart is None:
-            tstart = self.pricing_date
-        if tend is None:
-            tend = self.maturity
+        tstart = tstart if tstart is not None else self.pricing_date
+        tend = tend if tend is not None else self.maturity
         new_idx = np.concatenate([self.model_dates, df_.index])
-        new_idx = set(new_idx[(new_idx > tstart) * (new_idx <= tend)])
+        new_idx = set(new_idx[(new_idx >= tstart) * (new_idx <= tend)])
         return df_.reindex(index=new_idx).sort_index().interpolate(
             method=interp_method,
             axis=0,
@@ -345,10 +343,10 @@ class FixedCouponBond(Priceable):
                                       ) -> pd.DataFrame:
         df_ = gen_.simulate()
 
-        if tstart is None:
-            tstart = self.pricing_date
-        if tend is None:
-            tend = self.maturity
+        tstart = tstart if tstart is not None else self.pricing_date
+        tend = tend if tend is not None else self.maturity
+
+        df_.index = df_.index + tstart
         df_ = self.insert_dates_index(df_, tstart=tstart, tend=tend)
 
         df_discount = np.exp(
@@ -397,11 +395,13 @@ class FixedCouponBond(Priceable):
 
         PV_bullet_coupon = df_[discount_factor_name].loc[
             remaining_coupons
-        ].sum() * self.coupon * self.day_count_fraction
+        ].sum() * self.coupon * self.day_count_fraction\
+            / df_[discount_factor_name].loc[tstart]
 
         PV_bullet_principal = df_[discount_factor_name].loc[
             tend
-        ] * recovered_principal
+        ] * recovered_principal\
+            / df_[discount_factor_name].loc[tstart]
 
         return PV_bullet_coupon + PV_bullet_principal
 

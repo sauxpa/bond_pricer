@@ -3,9 +3,8 @@ import pandas as pd
 from collections import defaultdict
 from typing import Callable
 from sklearn.preprocessing import PolynomialFeatures
-from sklearn.linear_model import LinearRegression
+from sklearn.linear_model import Ridge
 from .bond import FixedCouponBond, BondPM_mgr
-from .utils import ONE_PCT
 
 
 class SingleCallableFixedCouponBond(FixedCouponBond):
@@ -63,22 +62,23 @@ class SingleCallableFixedCouponBond(FixedCouponBond):
             df = self.simulate_with_discount_factor(
                 self._gen_call_path,
                 idx=i,
-                tstart=0.0,
-                tend=self.maturity - self.call_date,
+                tstart=self.call_date,
+                tend=self.maturity,
                 )
+
             discount_factor_name = 'total_discount_factor_{}'.format(i)
 
             default_date = self.check_default(
                             df['CD_{}'.format(i)]
                             * self._gen_path.scheme_step,
-                            0.0,
-                            self.maturity - self.call_date,
+                            self.call_date,
+                            self.maturity,
                         )
 
             PV_no_call = self.PV_bullet_on_path(
                 df,
-                0.0,
-                self.maturity-self.call_date,
+                self.call_date,
+                self.maturity,
                 default_date=default_date,
                 discount_factor_name=discount_factor_name,
             )
@@ -224,11 +224,11 @@ class SingleCallableFixedCouponBondLS(FixedCouponBond):
             discount_factor_name = 'total_discount_factor_{}'.format(i)
 
             default_date = self.check_default(
-                            df['CD_{}'.format(i)]
-                            * self._gen_path.scheme_step,
-                            self.pricing_date,
-                            self.call_date,
-                        )
+                df['CD_{}'.format(i)]
+                * self._gen_path.scheme_step,
+                self.pricing_date,
+                self.call_date,
+                )
 
             PV_no_call = self.PV_bullet_on_path(
                 df,
@@ -236,12 +236,12 @@ class SingleCallableFixedCouponBondLS(FixedCouponBond):
                 self.maturity,
                 default_date=default_date,
                 discount_factor_name=discount_factor_name,
-            )
+                )
 
             short_rates[i] = [
                 df['IR_{}'.format(i)].loc[self.call_date],
                 df['CD_{}'.format(i)].loc[self.call_date]
-            ]
+                ]
             PV_no_calls[i] = PV_no_call
         return short_rates, PV_no_calls
 
@@ -253,13 +253,14 @@ class SingleCallableFixedCouponBondLS(FixedCouponBond):
         # Transform the short rates data into polynomial features.
         poly_short_rates = self._poly_features.fit_transform(short_rates)
 
-        log_PV_no_call_approximator = LinearRegression(
+        log_PV_no_call_approximator = Ridge(
+            alpha=0.01,
             fit_intercept=True,
             normalize=True,
             )
 
         log_PV_no_call_approximator.fit(
-            poly_short_rates / ONE_PCT,
+            poly_short_rates,
             np.log(PV_no_calls),
             )
         return log_PV_no_call_approximator
@@ -272,7 +273,7 @@ class SingleCallableFixedCouponBondLS(FixedCouponBond):
         """
         PV_no_call_pred = np.exp(
             log_PV_no_call_approximator.predict(
-                self._poly_features.fit_transform([short_rates / ONE_PCT])
+                self._poly_features.fit_transform([short_rates])
                 )
             )
         PV_call = self.principal
