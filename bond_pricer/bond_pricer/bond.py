@@ -316,7 +316,9 @@ class FixedCouponBond(Priceable):
 
     def insert_dates_index(self,
                            df_: pd.DataFrame,
-                           interp_method='linear',
+                           interp_method: str = 'linear',
+                           tstart: float = None,
+                           tend: float = None,
                            ) -> pd.DataFrame:
         """Coupon dates may no coincide with diffusion scheme knots.
         Interpolate between scheme knots to add coupon dates.
@@ -324,7 +326,12 @@ class FixedCouponBond(Priceable):
         the discount factors (more precise than interpolating the discount
         factors);
         """
-        new_idx = set(np.concatenate([self.model_dates, df_.index]))
+        if tstart is None:
+            tstart = self.pricing_date
+        if tend is None:
+            tend = self.maturity
+        new_idx = np.concatenate([self.model_dates, df_.index])
+        new_idx = set(new_idx[(new_idx > tstart) * (new_idx <= tend)])
         return df_.reindex(index=new_idx).sort_index().interpolate(
             method=interp_method,
             axis=0,
@@ -332,32 +339,39 @@ class FixedCouponBond(Priceable):
 
     def simulate_with_discount_factor(self,
                                       gen_: Callable,
-                                      idx=0,
+                                      idx: int = 0,
+                                      tstart: float = None,
+                                      tend: float = None,
                                       ) -> pd.DataFrame:
-        df = gen_.simulate()
-        df = self.insert_dates_index(df)
+        df_ = gen_.simulate()
+
+        if tstart is None:
+            tstart = self.pricing_date
+        if tend is None:
+            tend = self.maturity
+        df_ = self.insert_dates_index(df_, tstart=tstart, tend=tend)
 
         df_discount = np.exp(
-            -gen_.scheme_step * df[['IR', 'CD']].cumsum().iloc[:-1]
+            -gen_.scheme_step * df_[['IR', 'CD']].cumsum().iloc[:-1]
         )
-        df_discount.index = df.index[1:]
-        df['ir_discount_factor_{}'.format(idx)] = df_discount['IR']
-        df['survival_prob_{}'.format(idx)] = df_discount['CD']
-        df['fr_discount_factor_{}'.format(idx)] = np.exp(
-            -df.index * self.funding_rate
+        df_discount.index = df_.index[1:]
+        df_['ir_discount_factor_{}'.format(idx)] = df_discount['IR']
+        df_['survival_prob_{}'.format(idx)] = df_discount['CD']
+        df_['fr_discount_factor_{}'.format(idx)] = np.exp(
+            -df_.index * self.funding_rate
             )
-        df['ir_discount_factor_{}'.format(idx)].iloc[0] = 1.0
-        df['survival_prob_{}'.format(idx)].iloc[0] = 1.0
-        df['total_discount_factor_{}'.format(idx)] \
-            = df['ir_discount_factor_{}'.format(idx)] \
-            * df['fr_discount_factor_{}'.format(idx)]
-        df = df.rename(
+        df_['ir_discount_factor_{}'.format(idx)].iloc[0] = 1.0
+        df_['survival_prob_{}'.format(idx)].iloc[0] = 1.0
+        df_['total_discount_factor_{}'.format(idx)] \
+            = df_['ir_discount_factor_{}'.format(idx)] \
+            * df_['fr_discount_factor_{}'.format(idx)]
+        df_ = df_.rename(
             columns={
                 'IR': 'IR_{}'.format(idx),
                 'CD': 'CD_{}'.format(idx),
                 }
             )
-        return df
+        return df_
 
     def PV_bullet_on_path(
         self,
@@ -373,17 +387,22 @@ class FixedCouponBond(Priceable):
         otherwise it is on (tstart, default_date].
         """
         tend = default_date if default_date is not None else tend
+
         recovered_principal = self.recovery_rate * self.principal \
             if default_date is not None else self.principal
+
         remaining_coupons = self.coupon_dates[
             (self.coupon_dates > tstart) * (self.coupon_dates <= tend)
         ]
+
         PV_bullet_coupon = df_[discount_factor_name].loc[
             remaining_coupons
         ].sum() * self.coupon * self.day_count_fraction
+
         PV_bullet_principal = df_[discount_factor_name].loc[
             tend
         ] * recovered_principal
+
         return PV_bullet_coupon + PV_bullet_principal
 
     def model_price_paths(self) -> np.ndarray:

@@ -60,20 +60,25 @@ class SingleCallableFixedCouponBond(FixedCouponBond):
         self.init_gen_call_path(x0)
 
         for i in range(self.n_mc_call_sim):
-            df = self.simulate_with_discount_factor(self._gen_call_path, idx=i)
+            df = self.simulate_with_discount_factor(
+                self._gen_call_path,
+                idx=i,
+                tstart=0.0,
+                tend=self.maturity - self.call_date,
+                )
             discount_factor_name = 'total_discount_factor_{}'.format(i)
 
             default_date = self.check_default(
                             df['CD_{}'.format(i)]
                             * self._gen_path.scheme_step,
-                            self.pricing_date,
-                            self.call_date,
+                            0.0,
+                            self.maturity - self.call_date,
                         )
 
             PV_no_call = self.PV_bullet_on_path(
                 df,
-                self.call_date,
-                self.maturity,
+                0.0,
+                self.maturity-self.call_date,
                 default_date=default_date,
                 discount_factor_name=discount_factor_name,
             )
@@ -85,6 +90,9 @@ class SingleCallableFixedCouponBond(FixedCouponBond):
                      x0: np.ndarray,
                      ) -> tuple:
         """Estimate whether the issuer calls.
+        Returns a boolean for call decision (whether the average no call PV is
+        greater than the call PV) and the frequency of calls during the
+        simulations (to estimate call probability downstream).
         """
 
         PV_no_calls = self.generate_paths_after_call(x0)
@@ -134,7 +142,6 @@ class SingleCallableFixedCouponBond(FixedCouponBond):
                         discount_factor_name=discount_factor_name,
                     )
                 else:
-                    calls.append(False)
                     default_date = self.check_default(
                         df['CD_{}'.format(i)] * self._gen_path.scheme_step,
                         self.call_date,
