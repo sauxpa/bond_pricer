@@ -120,7 +120,7 @@ class FixedCouponBond(Priceable):
     def coupon_cashflows(self) -> np.ndarray:
         return self.day_count_fraction * self.coupon * np.ones(
             len(self.coupon_dates)
-            )
+            ) * self.principal
 
     @property
     def coupon_leg(self):

@@ -39,6 +39,7 @@ def extract_numeric_input(s: str) -> int:
 def make_dataset(marking_mode_int,
                  mark,
                  coupon,
+                 principal,
                  maturity,
                  coupon_frequency,
                  div_,
@@ -49,7 +50,7 @@ def make_dataset(marking_mode_int,
         None,
         {
             'coupon': coupon * ONE_PCT,
-            'principal': 1.0,
+            'principal': principal * ONE_PCT,
             'maturity': maturity,
             'coupon_frequency': coupon_frequency,
         }
@@ -106,6 +107,7 @@ def make_dataset(marking_mode_int,
 
 
 def make_dataset_model(coupon,
+                       principal,
                        maturity,
                        coupon_frequency,
                        recovery_rate,
@@ -130,7 +132,7 @@ def make_dataset_model(coupon,
         None,
         {
             'coupon': coupon * ONE_PCT,
-            'principal': 1.0,
+            'principal': principal * ONE_PCT,
             'maturity': maturity,
             'coupon_frequency': coupon_frequency,
         }
@@ -198,7 +200,7 @@ def make_dataset_model(coupon,
 
     # Warning! Call bond.paths AFTER calling bond.model_price
     df = bond.paths
-    df['t'] = df.index
+    df = df.assign(t=df.index).copy()
 
     # Convert dataframe to column data source#
     return ColumnDataSource(df)
@@ -492,6 +494,7 @@ def update(attr, old, new):
     marking_mode = marking_mode_select.value
     mark = extract_numeric_input(mark_select.value)
     coupon = extract_numeric_input(coupon_select.value)
+    principal = extract_numeric_input(principal_select.value)
     maturity = extract_numeric_input(maturity_select.value)
     coupon_frequency = extract_numeric_input(coupon_frequency_select.value)
 
@@ -499,6 +502,7 @@ def update(attr, old, new):
         marking_mode,
         mark,
         coupon,
+        principal,
         maturity,
         coupon_frequency,
         div,
@@ -514,6 +518,7 @@ def update_model(attr, old, new):
     """
     # Change parameters to selected values
     coupon_model = extract_numeric_input(coupon_model_select.value)
+    principal_model = extract_numeric_input(principal_model_select.value)
     maturity_model = extract_numeric_input(maturity_model_select.value)
     coupon_frequency_model = extract_numeric_input(
         coupon_frequency_model_select.value
@@ -540,6 +545,7 @@ def update_model(attr, old, new):
 
     new_src_model = make_dataset_model(
         coupon_model,
+        principal_model,
         maturity_model,
         coupon_frequency_model,
         recovery_rate,
@@ -637,6 +643,7 @@ mark_select = TextInput(value='100.00', title='Mark')
 
 # Bond term sheet
 coupon_select = TextInput(value='5.00', title='Coupon (%)')
+principal_select = TextInput(value='100', title='Principal')
 maturity_select = TextInput(value='5', title='Maturity (y)')
 coupon_frequency_select = TextInput(
     value='1',
@@ -647,12 +654,14 @@ coupon_frequency_select = TextInput(
 marking_mode_select.on_change('value', update)
 mark_select.on_change('value', update)
 coupon_select.on_change('value', update)
+principal_select.on_change('value', update)
 maturity_select.on_change('value', update)
 coupon_frequency_select.on_change('value', update)
 
 marking_mode = marking_mode_select.value
 mark = extract_numeric_input(mark_select.value)
 coupon = extract_numeric_input(coupon_select.value)
+principal = extract_numeric_input(principal_select.value)
 maturity = extract_numeric_input(maturity_select.value)
 coupon_frequency = extract_numeric_input(coupon_frequency_select.value)
 
@@ -662,6 +671,7 @@ src, src_duration = make_dataset(
     marking_mode,
     mark,
     coupon,
+    principal,
     maturity,
     coupon_frequency,
     div,
@@ -669,6 +679,7 @@ src, src_duration = make_dataset(
 
 controls = WidgetBox(
     coupon_select,
+    principal_select,
     maturity_select,
     coupon_frequency_select,
     marking_mode_select,
@@ -696,6 +707,7 @@ tab = Panel(child=layout_quoting, title='Bond pricer')
 ######################################################################
 # Bond term sheet
 coupon_model_select = TextInput(value='5.00', title='Coupon (%)')
+principal_model_select = TextInput(value='100', title='Principal')
 maturity_model_select = TextInput(value='5', title='Maturity (y)')
 coupon_frequency_model_select = TextInput(
     value='1',
@@ -727,6 +739,7 @@ corr_ir_cd_select = TextInput(value='0.0', title='Corr IR-CD (%)')
 
 # Update the plot when parameters are changed
 coupon_model_select.on_change('value', update_model)
+principal_model_select.on_change('value', update_model)
 maturity_model_select.on_change('value', update_model)
 coupon_frequency_model_select.on_change('value', update_model)
 
@@ -749,6 +762,7 @@ vol_cd_select.on_change('value', update_model)
 corr_ir_cd_select.on_change('value', update_model)
 
 coupon_model = extract_numeric_input(coupon_model_select.value)
+principal_model = extract_numeric_input(principal_model_select.value)
 maturity_model = extract_numeric_input(maturity_model_select.value)
 coupon_frequency_model = extract_numeric_input(
     coupon_frequency_model_select.value
@@ -776,6 +790,7 @@ div_model = Div(text='<b></b><br>', width=250, height=150)
 
 src_model = make_dataset_model(
     coupon_model,
+    principal_model,
     maturity_model,
     coupon_frequency_model,
     recovery_rate,
@@ -797,6 +812,7 @@ src_model = make_dataset_model(
 
 controls_model = WidgetBox(
     coupon_model_select,
+    principal_model_select,
     maturity_model_select,
     coupon_frequency_model_select,
     recovery_rate_select,
