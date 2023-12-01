@@ -1,8 +1,15 @@
 # bond_pricer
 
-**To run the app** :
+**To run the app**:
 * clone the repo
-* run bokeh serve --show bond_pricer_app/
+* install the module:
+  ```console
+  pip install -e bond_pricer/
+  ```
+* run
+  ```console
+  bokeh serve --show bond_pricer_app/
+  ```
 
 <img src="./bond_101.png"
      alt="bond_101"
